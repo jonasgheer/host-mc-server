@@ -24,7 +24,7 @@ func main() {
 				"\tsave-world			downloads the minecraft world and saves in current folder\n",
 				"\tterminate-server		stops and destroys the server")
 		case "start-server":
-			startServer()
+			startServer("minecraft")
 			/*
 				case "save-world":
 					saveWorld()
