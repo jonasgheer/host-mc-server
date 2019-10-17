@@ -38,6 +38,8 @@ func main() {
 			fmt.Printf("ip: %s\n", ipAddress)
 		case "terminate-server":
 			terminateServers(sess, "minecraft")
+		case "test":
+			test(sess)
 		default:
 			fmt.Printf("'%s' is not a command, type 'help'\n", cmdString)
 		}

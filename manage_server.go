@@ -128,4 +128,19 @@ func terminateServers(session *session.Session, tagValue string) {
 	}
 }
 
+func test(session *session.Session) {
+	svc := ssm.New(session)
+
+	sendcommandOutput, err := svc.SendCommand(&ssm.SendCommandInput{
+		DocumentName: aws.String("AWS-RunShellScript"),
+		Parameters: map[string][]*string{"commands": []*string{
+			aws.String("echo more-hello"),
+			aws.String("echo hello-again"),
+		}},
+		InstanceIds: []*string{aws.String("i-0041d402a819f00b3")},
+	})
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(*sendcommandOutput)
 }
