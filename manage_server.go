@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"fmt"
 	"log"
 
@@ -10,7 +11,7 @@ import (
 	"github.com/aws/aws-sdk-go/service/ssm"
 )
 
-func startServer(session *session.Session, tagValue string) (ipAddress string) {
+func start(session *session.Session, tagValue string) (ipAddress string) {
 	svc := ec2.New(session)
 
 	// check if minecraft instance already exists
@@ -42,10 +43,18 @@ func startServer(session *session.Session, tagValue string) (ipAddress string) {
 	}
 
 	runResult, err := svc.RunInstances(&ec2.RunInstancesInput{
-		ImageId:      aws.String("ami-0ce71448843cb18a1"),
-		InstanceType: aws.String("t2.micro"),
-		MinCount:     aws.Int64(1),
-		MaxCount:     aws.Int64(1),
+		ImageId:        aws.String("ami-0ce71448843cb18a1"),
+		InstanceType:   aws.String("t2.micro"),
+		MinCount:       aws.Int64(1),
+		MaxCount:       aws.Int64(1),
+		SecurityGroups: []*string{aws.String("minecraft")},
+		UserData: aws.String(base64.StdEncoding.EncodeToString([]byte(`#!/bin/bash
+							  yum update -y
+							  yum install java-1.8.0-openjdk-headless.x86_64 -y
+							  wget https://launcher.mojang.com/v1/objects/3dc3d84a581f14691199cf6831b71ed1296a9fdf/server.jar -O minecraft.jar
+							  java -Xmx1024M -Xms512M -jar minecraft.jar nogui
+							  sed -i -e s/eula=false/eula=true/g eula.txt
+							  screen -dmS minecraft java -Xmx1024M -Xms512M -jar minecraft.jar nogui`))),
 	})
 	if err != nil {
 		fmt.Println("Could not create instance:", err)
@@ -89,7 +98,7 @@ func startServer(session *session.Session, tagValue string) (ipAddress string) {
 	return *minecraftInstance.Reservations[0].Instances[0].PublicIpAddress
 }
 
-func terminateServers(session *session.Session, tagValue string) {
+func stop(session *session.Session, tagValue string) {
 	svc := ec2.New(session)
 	var instancesToDelete []string
 
