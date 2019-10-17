@@ -5,11 +5,21 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/session"
 )
 
 func main() {
 	fmt.Println("MC server tool")
+	var ipAddress string
 	reader := bufio.NewReader(os.Stdin)
+	sess, err := session.NewSession(&aws.Config{
+		Region: aws.String("eu-west-1"),
+	})
+	if err != nil {
+		panic(err)
+	}
 	for {
 		fmt.Print("> ")
 		cmdString, err := reader.ReadString('\n')
@@ -24,13 +34,10 @@ func main() {
 				"\tsave-world			downloads the minecraft world and saves in current folder\n",
 				"\tterminate-server		stops and destroys the server")
 		case "start-server":
-			startServer("minecraft")
-			/*
-				case "save-world":
-					saveWorld()
-				case "terminate-server":
-					terminateServer()
-			*/
+			ipAddress = startServer(sess, "minecraft")
+			fmt.Printf("ip: %s\n", ipAddress)
+		case "terminate-server":
+			terminateServers(sess, "minecraft")
 		default:
 			fmt.Printf("'%s' is not a command, type 'help'\n", cmdString)
 		}

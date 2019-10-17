@@ -7,17 +7,11 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/ec2"
+	"github.com/aws/aws-sdk-go/service/ssm"
 )
 
-func startServer(tagValue string) {
-	sess, err := session.NewSession(&aws.Config{
-		Region: aws.String("eu-west-1"),
-	})
-	if err != nil {
-		panic(err)
-	}
-
-	svc := ec2.New(sess)
+func startServer(session *session.Session, tagValue string) (ipAddress string) {
+	svc := ec2.New(session)
 
 	// check if minecraft instance already exists
 	instancesInfo, err := svc.DescribeInstances(&ec2.DescribeInstancesInput{
@@ -39,8 +33,8 @@ func startServer(tagValue string) {
 				for _, tag := range instance.Tags {
 					if *tag.Key == "Name" && *tag.Value == tagValue {
 						// panics if instance does not have public ip
-						fmt.Printf("Instance already exists: %s\n", *instance.PublicIpAddress)
-						return
+						fmt.Println("Instance already exists")
+						return *instance.PublicIpAddress
 					}
 				}
 			}
@@ -91,4 +85,47 @@ func startServer(tagValue string) {
 	}
 
 	fmt.Println("Successfully tagged instance")
+
+	return *minecraftInstance.Reservations[0].Instances[0].PublicIpAddress
+}
+
+func terminateServers(session *session.Session, tagValue string) {
+	svc := ec2.New(session)
+	var instancesToDelete []string
+
+	instancesInfo, err := svc.DescribeInstances(&ec2.DescribeInstancesInput{
+		Filters: []*ec2.Filter{
+			{
+				Name:   aws.String("tag:Name"),
+				Values: []*string{aws.String(tagValue)},
+			},
+		},
+	})
+	if err != nil {
+		fmt.Println("Error", err)
+	} else {
+		for _, reservation := range instancesInfo.Reservations {
+			for _, instance := range reservation.Instances {
+				if *instance.State.Name != "terminated" {
+					for _, tag := range instance.Tags {
+						if *tag.Key == "Name" && *tag.Value == tagValue {
+							instancesToDelete = append(instancesToDelete, *instance.InstanceId)
+						}
+					}
+				}
+			}
+		}
+	}
+	fmt.Println(instancesToDelete)
+	terminateOutput, err := svc.TerminateInstances(&ec2.TerminateInstancesInput{
+		InstanceIds: aws.StringSlice(instancesToDelete),
+	})
+	if err != nil {
+		panic(err)
+	}
+	for _, instanceStateChange := range terminateOutput.TerminatingInstances {
+		fmt.Printf("Instance %s %s\n", *instanceStateChange.InstanceId, *instanceStateChange.CurrentState)
+	}
+}
+
 }
