@@ -11,34 +11,23 @@ import (
 	"github.com/aws/aws-sdk-go/service/ssm"
 )
 
-func start(session *session.Session, tagValue string) (ipAddress string) {
+const startupScript = `#!/bin/bash
+					   yum update -y
+					   yum install java-1.8.0-openjdk-headless.x86_64 -y
+					   wget https://launcher.mojang.com/v1/objects/3dc3d84a581f14691199cf6831b71ed1296a9fdf/server.jar -O minecraft.jar
+					   java -Xmx1024M -Xms512M -jar minecraft.jar nogui
+					   sed -i -e s/eula=false/eula=true/g eula.txt
+					   screen -dmS minecraft java -Xmx1024M -Xms512M -jar minecraft.jar nogui`
+
+func start(session *session.Session, tagKey, tagValue string) (ipAddress string) {
 	svc := ec2.New(session)
 
-	// check if minecraft instance already exists
-	instancesInfo, err := svc.DescribeInstances(&ec2.DescribeInstancesInput{
-		Filters: []*ec2.Filter{
-			{
-				Name:   aws.String("tag:Name"),
-				Values: []*string{aws.String(tagValue)},
-			},
-		},
-	})
-	if err != nil {
-		fmt.Println("Error", err)
-	} else {
-		for _, reservation := range instancesInfo.Reservations {
-			for _, instance := range reservation.Instances {
-				if *instance.State.Name == "terminated" {
-					continue
-				}
-				for _, tag := range instance.Tags {
-					if *tag.Key == "Name" && *tag.Value == tagValue {
-						// panics if instance does not have public ip
-						fmt.Println("Instance already exists")
-						return *instance.PublicIpAddress
-					}
-				}
-			}
+	instances := fetchRunningInstancesByTag(session, tagKey, tagValue)
+
+	if len(instances) > 0 {
+		for _, instance := range instances {
+			fmt.Println("Instance already exists")
+			return *instance.PublicIpAddress
 		}
 	}
 
@@ -47,14 +36,8 @@ func start(session *session.Session, tagValue string) (ipAddress string) {
 		InstanceType:   aws.String("t2.micro"),
 		MinCount:       aws.Int64(1),
 		MaxCount:       aws.Int64(1),
-		SecurityGroups: []*string{aws.String("minecraft")},
-		UserData: aws.String(base64.StdEncoding.EncodeToString([]byte(`#!/bin/bash
-							  yum update -y
-							  yum install java-1.8.0-openjdk-headless.x86_64 -y
-							  wget https://launcher.mojang.com/v1/objects/3dc3d84a581f14691199cf6831b71ed1296a9fdf/server.jar -O minecraft.jar
-							  java -Xmx1024M -Xms512M -jar minecraft.jar nogui
-							  sed -i -e s/eula=false/eula=true/g eula.txt
-							  screen -dmS minecraft java -Xmx1024M -Xms512M -jar minecraft.jar nogui`))),
+		SecurityGroups: []*string{aws.String(tagValue)},
+		UserData:       aws.String(base64.StdEncoding.EncodeToString([]byte(startupScript))),
 	})
 	if err != nil {
 		fmt.Println("Could not create instance:", err)
@@ -83,7 +66,7 @@ func start(session *session.Session, tagValue string) (ipAddress string) {
 		Resources: []*string{runResult.Instances[0].InstanceId},
 		Tags: []*ec2.Tag{
 			{
-				Key:   aws.String("Name"),
+				Key:   aws.String(tagKey),
 				Value: aws.String(tagValue),
 			},
 		},
@@ -98,36 +81,43 @@ func start(session *session.Session, tagValue string) (ipAddress string) {
 	return *minecraftInstance.Reservations[0].Instances[0].PublicIpAddress
 }
 
-func stop(session *session.Session, tagValue string) {
+func fetchRunningInstancesByTag(session *session.Session, tagKey, tagValue string) []ec2.Instance {
 	svc := ec2.New(session)
-	var instancesToDelete []string
-
+	var instances []ec2.Instance
 	instancesInfo, err := svc.DescribeInstances(&ec2.DescribeInstancesInput{
 		Filters: []*ec2.Filter{
 			{
-				Name:   aws.String("tag:Name"),
+				Name:   aws.String(fmt.Sprintf("tag:%s", tagKey)),
 				Values: []*string{aws.String(tagValue)},
 			},
 		},
 	})
 	if err != nil {
-		fmt.Println("Error", err)
+		panic(err)
 	} else {
 		for _, reservation := range instancesInfo.Reservations {
 			for _, instance := range reservation.Instances {
-				if *instance.State.Name != "terminated" {
-					for _, tag := range instance.Tags {
-						if *tag.Key == "Name" && *tag.Value == tagValue {
-							instancesToDelete = append(instancesToDelete, *instance.InstanceId)
-						}
-					}
+				if *instance.State.Name == "running" {
+					instances = append(instances, *instance)
 				}
 			}
 		}
 	}
+	return instances
+}
+
+func stop(session *session.Session, tagValue string) {
+	svc := ec2.New(session)
+	instancesToDelete := fetchRunningInstancesByTag(session, tagKey, tagValue)
+
+	var instanceIds []string
+	for _, instance := range instancesToDelete {
+		instanceIds = append(instanceIds, *instance.InstanceId)
+	}
+
 	fmt.Println(instancesToDelete)
 	terminateOutput, err := svc.TerminateInstances(&ec2.TerminateInstancesInput{
-		InstanceIds: aws.StringSlice(instancesToDelete),
+		InstanceIds: aws.StringSlice(instanceIds),
 	})
 	if err != nil {
 		panic(err)
