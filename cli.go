@@ -3,17 +3,26 @@ package main
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
+	"golang.org/x/crypto/ssh"
 )
 
-const (
-	tagKey   = "Name"
-	tagValue = "minecraft"
-)
+var sshConfig = &ssh.ClientConfig{
+	User: "ec2-user",
+	Auth: []ssh.AuthMethod{
+		publicKey("myFirstKey"),
+	},
+	HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+}
 
 func main() {
+	const (
+		tagKey   = "Name"
+		tagValue = "minecraft"
+	)
 	command := os.Args[1]
 	var ipAddress string
 	sess, err := session.NewSession(&aws.Config{
@@ -35,9 +44,26 @@ func main() {
 		ipAddress = start(sess, tagKey, tagValue)
 		fmt.Printf("ip: %s\n", ipAddress)
 	case "stop":
-		stop(sess, tagValue)
-	case "test":
-		test(sess)
+		instances := fetchRunningInstancesByTag(sess, tagKey, tagValue)
+		if len(instances) == 0 {
+			fmt.Println("No minecraft instances to shut down")
+			os.Exit(1)
+		} else if len(instances) > 1 {
+			fmt.Println("More than one minecraft instance running. Check AWS")
+			os.Exit(1)
+		}
+		fmt.Println(*instances[0].InstanceId)
+		fmt.Println(len(instances))
+		stopMcServer()
+		time.Sleep(5 * time.Second) // give 5 sec for server to save world
+		err := downloadWorld()
+		if err != nil {
+			fmt.Println("Could not download world, canceling instance termination")
+			os.Exit(1)
+		}
+		//stop(sess, tagKey, tagValue)
+	case "download":
+		downloadWorld()
 	case "fetch":
 		instances := fetchRunningInstancesByTag(sess, tagKey, tagValue)
 		fmt.Println(len(instances))
